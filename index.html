@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Path of Exile on Linux: the hideout that took forever after every restart</title>
+<meta name="description" content="Why Path of Exile and Path of Exile 2 reloaded every shader after each restart under Steam/Proton on an NVIDIA GPU, how it was diagnosed from logs and file timestamps, and the two-variable fix.">
+<style>
+  :root{
+    --bg:#f7f5f0; --fg:#1d1b17; --muted:#5f5a50; --line:#d9d4c8; --card:#fffdf8;
+    --accent:#8a4b1f; --code:#efeae0; --ok:#2f6b3a; --bad:#9a2f2f; --mark:#fff2b3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#15140f; --fg:#ece7da; --muted:#a49d8d; --line:#3a372e; --card:#1d1b15;
+           --accent:#e0a36a; --code:#23211a; --ok:#7fc48d; --bad:#e08a8a; --mark:#4a4020; }
+  }
+  html{color-scheme:light dark}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 Georgia,"Iowan Old Style",Charter,serif;padding:0 16px}
+  main{max-width:46rem;margin:0 auto;padding-block:2.5rem 4rem}
+  h1{font-size:2rem;line-height:1.15;margin:0 0 .5rem}
+  h2{font-size:1.25rem;margin:2.4rem 0 .6rem;border-bottom:1px solid var(--line);padding-bottom:.25rem}
+  h3{font-size:1.02rem;margin:1.4rem 0 .3rem}
+  p{margin:.6rem 0}
+  .lede{color:var(--muted);font-size:1.05rem}
+  .meta{color:var(--muted);font-size:.85rem;font-family:ui-monospace,Menlo,Consolas,monospace}
+  code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em}
+  code{background:var(--code);padding:.05em .3em;border-radius:3px}
+  pre{background:var(--code);padding:.8rem 1rem;border-radius:6px;overflow-x:auto;line-height:1.4;margin:.7rem 0}
+  pre code{background:none;padding:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:1rem 1.2rem;margin:1rem 0}
+  .card h2{margin-top:0;border:0;padding:0}
+  table{border-collapse:collapse;width:100%;margin:.7rem 0;font-size:.93rem}
+  th,td{text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-weight:600;color:var(--muted);font-size:.85rem}
+  .tbl{overflow-x:auto}
+  .ok{color:var(--ok)} .bad{color:var(--bad)}
+  mark{background:var(--mark);color:inherit;padding:0 .15em}
+  ol.timeline{padding-left:1.2rem}
+  ol.timeline li{margin:.55rem 0}
+  ol.timeline b{font-weight:600}
+  a{color:var(--accent)}
+  details{margin:.6rem 0}
+  summary{cursor:pointer;color:var(--muted)}
+  footer{margin-top:3rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+</style>
+</head>
+<body>
+<main>
+<p class="meta">tinycrops · 2026-09-11 · Linux / Steam / Proton / NVIDIA</p>
+<h1>Path of Exile on Linux: the hideout that took forever after every restart</h1>
+<p class="lede">The game was reloading every shader it owned each time it started. Not disk, not RAM, not permissions. The NVIDIA driver was deleting its own cache at launch, and Steam had quietly stopped protecting it.</p>
+
+<div class="card">
+<h2>The fix</h2>
+<pre><code>git clone https://github.com/tinycrops/poe-linux-shader-cache-fix
+cd poe-linux-shader-cache-fix
+./check.sh   # read-only: is the cache being wiped?
+./fix.sh     # raise the NVIDIA shader cache limit to 20 GiB, disable cleanup, session-wide</code></pre>
+<p>Under the hood it is two environment variables, set for the <em>whole</em> desktop session rather than as a per-game launch option:</p>
+<pre><code>__GL_SHADER_DISK_CACHE_SIZE=21474836480
+__GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1</code></pre>
+<p>No sudo. Quit and restart Steam, then log out and in once. The first launch after that is the last cold compile.</p>
+</div>
+
+<h2>The symptom</h2>
+<p>Path of Exile 2 on a GTX 1060 6&nbsp;GB, Ubuntu 24.04, Proton Experimental, the game's native Vulkan renderer. Play ran fine. But every restart of the game sat on the hideout loading screen for minutes, and the request that started this was simply: <em>"every time I restart my Path of Exile 2 game the hideout takes forever to load. please fix this."</em></p>
+
+<h2>What the logs said, in order</h2>
+<ol class="timeline">
+<li><b>The obvious suspect was a red herring.</b> The game's own log, <code>logs/Client.txt</code>, prints this on every launch:
+<pre><code>[CRIT Client 308] Failed to open LMDB environment at C:\users\steamuser\AppData\Local\Path of Exile 2\Pipelines. Error: Access denied.
+[CRIT Client 308] Failed to open LMDB environment at C:\users\steamuser\AppData\Local\Path of Exile 2\Shaders. Error: Access denied.</code></pre>
+That is the game's persistent pipeline cache failing to open. It reads like a permissions problem, and the first instinct (mine and the user's) was to fix permissions. But the folders are owned by the user, mode 775, files 664, the <code>data.mdb</code> inside is a fresh 8&nbsp;KB every launch, and the error appears in 30 of 30 launches since install, and 324 times in Path of Exile 1's log too. It is a failure inside Wine's Windows API layer, not the filesystem. <mark>Real, unfixed, and not the cause of the slow load.</mark></li>
+
+<li><b>The driver's cache was being written to the wrong place.</b> Steam normally hands NVIDIA games a managed cache directory under <code>steamapps/shadercache/&lt;appid&gt;/nvidiav1</code>. That directory's files had last been written on <b>Sep 4 at 18:50</b>, although the game had run twenty times since. The running game's open file descriptors showed where the driver was actually writing: <code>~/.cache/nvidia/GLCache/…/92f74448a56b9fe8.bin</code>, the driver's <em>default</em> location.</li>
+
+<li><b>Steam's shader log dated the change exactly.</b> <code>logs/shader_log.txt</code> contains a <code>Setting MESA_GLSL_CACHE_DIR=…/shadercache/2694490</code> line for every launch where Steam applied its managed cache. Five launches had it, the last at <b>Sep 4 18:41</b>. Every launch after Steam restarted at 19:38 that evening lacked it, for both games. The Steam client version changed at that restart (<code>1785799196 → 1788400362</code>). Steam still downloads and processes shader buckets in the background; it just no longer applies them at launch. Cause not established beyond that correlation.</li>
+
+<li><b>The default cache has a 1&nbsp;GiB limit, and the driver wipes it.</b> From the NVIDIA README, chapter 11K: if the cache is over the size limit when an application starts, the driver deletes it. The limit has been 1&nbsp;GiB since driver 460 (128&nbsp;MB before that). The README also warns that any app started <em>without</em> a raised limit reverts to the default and can wipe the cache, which is why a per-game launch option is not enough.</li>
+
+<li><b>File birth times proved the wipe.</b> <code>stat -c %w</code> on the driver's cache directory: the whole per-driver folder and every file in it had been created at <b>04:15:37</b> on Sep 11, the exact second of the previous game launch. The file the running game was writing had reached 200&nbsp;MB thirteen minutes in and 680&nbsp;MB an hour later.</li>
+
+<li><b>Path of Exile 1 shows how far over the limit these games go.</b> Its Steam-managed NVIDIA cache, from before Sep 4, is a single 5.2&nbsp;GB file. Steam's managed path carries no limit; the driver's default path throws all of that away the moment a session pushes it past 1&nbsp;GiB. One evening of mapping is enough, so nearly every launch started cold, and the hideout, being the first area, paid for recompiling everything.</li>
+</ol>
+
+<div class="tbl">
+<table>
+<tr><th>Evidence</th><th>Value</th></tr>
+<tr><td>Driver default shader cache limit (driver ≥ 460)</td><td>1 GiB</td></tr>
+<tr><td>PoE 2 driver cache written in first 13 min of a session</td><td>200 MB</td></tr>
+<tr><td>PoE 2 driver cache after ~1 h</td><td>680 MB</td></tr>
+<tr><td>PoE 1 cache under Steam's management (no limit)</td><td>5.2 GB</td></tr>
+<tr><td>Last launch Steam applied its managed cache (PoE 2 / PoE 1)</td><td>2026-09-04 18:41 / 18:52</td></tr>
+<tr><td>Steam client version change that evening</td><td>1785799196 → 1788400362</td></tr>
+<tr><td>Driver cache directory creation time</td><td>2026-09-11 04:15:37 = previous launch</td></tr>
+<tr><td>LMDB "Access denied" lines (PoE 2 / PoE 1)</td><td>30 of 30 launches / 324 lines</td></tr>
+</table>
+</div>
+
+<h2>What fix.sh changes</h2>
+<table>
+<tr><th>Where</th><th>Why</th></tr>
+<tr><td><code>~/.config/environment.d/50-nvidia-shader-cache.conf</code></td><td>systemd user session; every app started after the next login</td></tr>
+<tr><td><code>~/.profile</code></td><td>login shells and GDM's X11 session setup</td></tr>
+<tr><td><code>~/.local/share/applications/*.desktop</code> that launch Steam</td><td><code>env …</code> prefix on the Exec line, so the very next Steam start gets it before logging out. A symlinked <code>steam.desktop</code> is replaced by a user copy.</td></tr>
+<tr><td>live <code>systemctl --user set-environment</code> and D-Bus activation env</td><td>apps launched through systemd or D-Bus activation from now on</td></tr>
+</table>
+<p>Everything is idempotent and needs no sudo. <code>SHADER_CACHE_SIZE=&lt;bytes&gt; ./fix.sh</code> picks a different limit; <code>./fix.sh --dry-run</code> only prints.</p>
+
+<h2>Verifying it worked</h2>
+<p>After a long session and a restart, the driver's cache files should keep their creation date across launches:</p>
+<pre><code>stat -c '%w  %10s  %n' ~/.cache/nvidia/GLCache/*/*/*.bin</code></pre>
+<p>If a file's creation time equals a launch time, the cache was wiped at that launch. <code>check.sh</code> prints the same view, plus whether the variables are set and whether Steam is applying its own cache.</p>
+
+<h2>Still open</h2>
+<ul>
+<li><b>The LMDB "Access denied" failure</b> means the game's own pipeline cache never persists under Proton. Same on Proton 10 (PoE 1) and Proton Experimental (PoE 2). With the driver cache intact it stops mattering much, but a native fix would be better. No known workaround found.</li>
+<li><b>Why Steam stopped applying its managed cache</b> after the Sep 4 client update. If it resumes, nothing here conflicts: Steam's path sets its own variables per launch.</li>
+<li>The client logs <code>[SteamdeckSettingsInit] running on steamdeck: 1</code> on a desktop and re-applies Steam Deck display defaults each launch. Unrelated, noted.</li>
+</ul>
+
+<details>
+<summary>How this was diagnosed (the making-of)</summary>
+<p>All of it was done while the game was running, read-only, without touching the process: <code>Client.txt</code> and <code>LatestClient.txt</code> for the game's own view; <code>/proc/&lt;pid&gt;/environ</code> to see that no <code>__GL_SHADER_DISK_CACHE_PATH</code> had been passed; <code>/proc/&lt;pid&gt;/fd</code> to see which cache file the driver actually had open; <code>stat -c %w</code> for birth times, which ext4 keeps and which turned a hypothesis into a timestamp; Steam's <code>logs/shader_log.txt</code> and <code>console_log.txt</code> for when the managed cache was and was not applied; and the driver's own README on disk for the rule that explained the wipe. The one tempting shortcut, "rewrite the permissions", was checked and rejected on the numbers before anything was changed.</p>
+</details>
+
+<h2>Tested on</h2>
+<p>Ubuntu 24.04, GNOME on X11, NVIDIA 580.173.02, GTX 1060 6&nbsp;GB, Steam 1788652215, Path of Exile (Proton 10) and Path of Exile 2 (Proton Experimental), both on the native Vulkan renderer.</p>
+
+<h2>References</h2>
+<ul>
+<li>NVIDIA driver README, chapter 11K, "Shader disk cache" (shipped as <code>/usr/share/doc/nvidia-driver-580/README.txt.gz</code>; <a href="https://download.nvidia.com/XFree86/Linux-x86_64/470.239.06/README/openglenvvariables.html">online copy of the environment-variable chapter</a>)</li>
+<li><a href="https://github.com/ValveSoftware/steam-for-linux/issues/11392">steam-for-linux #11392</a>: precompiled shaders pruned by the NVIDIA driver, with the same variable as the workaround</li>
+<li><a href="https://forums.developer.nvidia.com/t/opengl-shader-disk-cache-max-size-garbage-collection/60056">NVIDIA forums: OpenGL shader disk cache max size and garbage collection</a> (the 128 MB → 1 GB change in 460)</li>
+</ul>
+
+<footer>Source: <a href="https://github.com/tinycrops/poe-linux-shader-cache-fix">github.com/tinycrops/poe-linux-shader-cache-fix</a> · MIT</footer>
+</main>
+</body>
+</html>
