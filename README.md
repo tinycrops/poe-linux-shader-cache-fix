@@ -58,7 +58,11 @@ shader variants goes cold about once per 2 GiB of new pipelines. The durable
 answer is Steam's own shader-cache management (it merges and deduplicates the
 driver caches; PoE 1's managed cache reached 5.2 GB in one file and kept
 working), which stopped being applied here after the Sep 4 client update.
-Check Steam → Settings → Downloads → Shader Pre-Caching is on.
+Check Steam → Settings → Downloads → Shader Pre-Caching is on. Related: GGG's
+0.5.4e patch (2026-07-30) disabled the Fossilize layer for the game on Steam
+because the Steam cache "could grow to an immense size"; the managed NVIDIA
+cache kept being applied for five weeks after that, so the two changes are
+separate as far as this machine's logs show.
 
 ## Not fixed
 

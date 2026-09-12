@@ -120,7 +120,7 @@ That is the game's persistent pipeline cache failing to open. It reads like a pe
 <h2>Still open</h2>
 <ul>
 <li><b>The LMDB "Access denied" failure</b> means the game's own pipeline cache never persists under Proton. Same on Proton 10 (PoE 1) and Proton Experimental (PoE 2). With the driver cache intact it stops mattering much, but a native fix would be better. No known workaround found.</li>
-<li><b>Why Steam stopped applying its managed cache</b> after the Sep 4 client update. If it resumes, nothing here conflicts: Steam's path sets its own variables per launch.</li>
+<li><b>Why Steam stopped applying its managed cache</b> after the Sep 4 client update. Context found on day two: GGG's 0.5.4e patch (July 30) "disabled the Fossilize Vulkan layer when playing on Steam, which fixes an issue where the Steam shader cache could grow to an immense size" (<a href="https://www.pathofexile.com/forum/view-thread/3991222">patch notes</a>, prompted by <a href="https://www.pathofexile.com/forum/view-thread/3839081">this Linux report</a>). Steam kept applying its managed NVIDIA cache to the game for five weeks after that; it stopped with the client update. Whether the two are connected I cannot tell from this machine. If it resumes, nothing here conflicts: Steam's path sets its own variables per launch.</li>
 <li>The client logs <code>[SteamdeckSettingsInit] running on steamdeck: 1</code> on a desktop and re-applies Steam Deck display defaults each launch. Unrelated, noted.</li>
 </ul>
 
