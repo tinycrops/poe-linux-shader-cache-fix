@@ -26,6 +26,10 @@ if [ -d "$CACHE" ]; then
   while IFS= read -r d; do
     echo "  $d  (dir created $(stat -c %w "$d" | cut -c1-19))"
     find "$d" -maxdepth 1 -name '*.bin' -printf '     created %TY-%Tm-%Td %TH:%TM  %10s bytes  %f\n' | sort
+    for b in "$d"/*.bin; do
+      sz=$(stat -c %s "$b" 2>/dev/null || echo 0)
+      [ "$sz" -ge $((1900*1024*1024)) ] && echo "     !! $(basename "$b") is $((sz/1024/1024)) MiB: past ~2 GiB the driver abandons the file and starts cold (see overlap.py)"
+    done
     s=$(du -sb "$d" | cut -f1); total=$((total+s))
   done < <(find "$CACHE" -mindepth 2 -maxdepth 2 -type d)
   echo "  total: $total bytes"
